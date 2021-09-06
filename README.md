@@ -163,8 +163,50 @@ Chỉ biến môi trường ETCD_DATA_DIR trong systemd đúng với path vừa 
 
 #### 15% - Workloads & Scheduling
 
-** Sheduling **
+**Sheduling**
 
+Việc schedule cho `pod` được thực hiện bởi `kube-scheduler`. Tuy nhiên sẽ các trường hợp đề sẽ yêu cầu bạn manual scheduling khi kube-scheduler không hoạt động.
+
+- Đề yêu cầu bạn tạm thời disable static pod kube-schedule rồi tạo 1 pod và schedule nó lên một node được đặt tên là node01.
+``` yaml
+// $ mv /etc/kubenetes/manifests/kube-schedulers.yaml /opt
+// $ kubectl -n kube-system get pod  # chắc rằng pod đã tạm thời bị disable
+// $ kubectl run pod --image=nginx --dry-run=client -o yaml > pod.yaml
+// # edit file pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod
+spec:
+  nodeName: node01  // Name of node where the pod is located at
+  containers:
+  - image: nginx
+    name: pod
+```
+
+- Taints và tolerations: 
+  Mặc định khi khởi tạo cluster bằng kubeadm thì master node sẽ được thiết lập thuộc tính taints. 
+``` shell
+$ kubectl describe node master | grep -i taints # Use option "-i" is search pattern without case sensitive
+Taints: node-role.kubernetes.io/master:NoSchedule
+```
+  Khi masster node có thuộc tính taints nghĩa là kube-scheduler sẽ không lập lịch các pod bình thường vào node này. Để lập lịch pod có thể được locate lên master ta action như sau:
+  ``` yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: pod
+  spec:
+    tolerations:
+    - key:  node-role.kubernetes.io/master
+      effect: NoSchedule
+    containers:
+    - name: pod
+      image: nginx
+  ```
+- NodeSelector
+**Workloads**
 
 #### 20% - Services & Networking
 
