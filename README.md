@@ -470,6 +470,29 @@ spec:
       protocol: TCP
 ```
 
+- ***Ingress Controller***
+
+  Create ingress services ingress-app-1 for service service-1 in `namespace-1` namespace with prefix path /hello
+  ``` yaml
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: ingress-app-1
+    namepsace: namespace-1
+  spec:
+    rules:
+    - http:
+        paths:
+        - path: /hello
+          pathType: Prefix
+          backend:
+            service:
+              name: service-1
+              port:
+                number: 80
+  ```
+
+
 #### 10% - Storage
 
 Phần này khá dễ, chủ yếu đọc kĩ đề và lựa chọn đúng storage classes, đúng accessMode, đặt đúng tên PV hoặc PVC lúc config
@@ -531,6 +554,120 @@ Theo tôi tìm hiểu phần lớn các lỗi của các component trên đều 
 - Image name của container  kubec-schuduler hay apiserver trong static pod bị sai.
 
 Cố gắng đọc kỹ yêu cầu của đề. Maybe chỉ đơn giản là lệnh start services của kubelet và enable services kubelet là bạn đã hoàn thành câu trả lời.
+
+
+#### RBAC
+
+- ***Role&ClusterRole**
+  
+  Chứa tập hợp các rules đại diện cho một số quyền nào đó. Rules này chỉ có tính chất thêm vào chứ ko chặn quyền.
+
+  - Role hoạt động trong 1 name namespace cụ thể
+  - Cluster role: hoạt động trong non-namespaced.
+   
+  *Role*
+  
+  ```yaml
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: Role
+  metadata:
+    namespace: default
+    name: pod-reader
+  rules:
+  - apiGroups: [""] # "" indicates the core API group
+    resources: ["pods"]
+    verbs: ["get", "watch", "list"]
+  // fast command with kubectl
+  $ kubectl create role pod-reader -n default --verb=get,watch,list --resource=pod
+  ```
+  
+  *ClusterRole*
+
+  ```yaml
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRole
+  metadata:
+    name: create-deployment
+  rules:
+  - apiGroups: ["apps","extensions"]
+    resources: ["deployments"]
+    verbs: ["create"]
+
+  // fast command
+  $ kubectl create clusterrole create-deployment --verb=create --resource=deployments
+  ```
+
+  *Tip*
+  - Resorce: lower case and end with `s`. Example: pod`s`, deployement`s`, secret`s`, v.v...
+
+  *RoleBinding/Cluster role binding
+  
+  ``` yaml
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    name: pod-reader
+    namespace: default
+  subjects:
+  - kind: User
+    name: dave # Name is case sensitive
+    apiGroup: rbac.authorization.k8s.io
+  roleRef:
+    kind: Role
+    name: pod-reader
+    apiGroup: rbac.authorization.k8s.io
+  ```
+  RoleBinding có thể tham chiếu đến ClusterRole để thiết lập quyền cho namespace nhất định.
+
+  ``` yaml
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    name: create-deployment
+    namespace: staging
+  subjects:
+  - kind: User
+    name: dave # Name is case sensitive
+    apiGroup: rbac.authorization.k8s.io
+  roleRef:
+    kind: ClusterRole
+    name: create-deployment
+    apiGroup: rbac.authorization.k8s.io
+  ```
+
+  ```yaml
+  apiVersion: rbac.authorization.k8s.io/v1
+  # This cluster role binding allows anyone in the "manager" group to read secrets in any namespace.
+  kind: ClusterRoleBinding
+  metadata:
+    name: read-secrets-global
+  subjects:
+  - kind: Group
+    name: manager # Name is case sensitive
+    apiGroup: rbac.authorization.k8s.io
+  roleRef:
+    kind: ClusterRole
+    name: secret-reader
+    apiGroup: rbac.authorization.k8s.io
+  ```
+
+  *Command*
+
+  ``` shell
+  # With user
+  $ kubectl rolebinding pod-reader --role=pod-reader -n default --user=dave
+
+  # With services account
+  $ kubectl rolebinding pod-reader --role=pod-reader -n default --serviceaccount=default:admin
+
+  $ kubectl rolebinding create-deployment --clusterrole=create-deployment -n staging --user=dave
+
+  $ kubectl clusterrolebinding read-secrets-global --clusterrole=secret-reader --group=manager
+
+  # Check
+  $ kubectl auth can-i <verb> <resource> [-n namespace ] --as <user>
+  $ kubectl auth can-i <verb> <resource> --as system:serviceaccount:<namespace>:<service_account_name>
+  ```
 
 ## Cluster for CKA
 
