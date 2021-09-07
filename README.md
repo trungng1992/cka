@@ -333,14 +333,142 @@ Taints: node-role.kubernetes.io/master:NoSchedule
 
 **Workloads**
 
+  - ***Scale***:
+  
+  ```kubectl scale <resource> <name> --replicas=<number_replicas> [--record=true]```
+
+  Resouce available:
+  * Deployment
+  * Statefulset
+  * ReplicaSet
+
+  Options: record=true. It allows record the command in `Annotations`
+
+  - ***tip***: 
+  
+  Trong bài thi, nếu đề yêu cầu bạn scale một applications trong một namespace nào đó. Không chỉ rõ resource source nào thì có thể check bằng command như sau:
+
+  ```kubectl -n <namespace> get all | grep -i "<pattern_you_wanna_search">```
+
+  - ***Create manifest for daemonset app-1 quickly***:
+
+  ```kubectl create deployment app-1 -n namespace1 --image=nginx --dry-run=client -o yaml > pod-1.yaml```
+  
+  Edit the manifest
+
+  ```yaml
+  // pod-1.yaml
+  apiVersion: apps
+  kind: DaemonSet # change Deployment to DaemonSet
+  metadata:
+    labels:
+      app: app-1
+    name: app-1
+    namespace: namespace-1
+  spec:
+    # replicas: 1    remove line
+    selector:
+      matchLabels:
+        app: app-1
+    # strategy: {}   remove line
+    template:
+      metadata:
+        labels:
+          app: app-1
+      spec:
+        containers:
+        - image: nginx
+          name: nginx
+          resources: {}
+  ```
+
+  - ***Update image for deployment app-1 and record***
+
+  ```kubectl set image deployment app-1 <name_container>=<version> --record=true```
+
+  Eg: ```kubectl set image deployment app-1 nginx=1.21 --record=true```
+
+  - ***Undo revision***
+
+  ```kubectl rollout undo <resource> <name> --to-revision=<revision>```
+
+  Eg: ```kubectl rollout undo daemonset ingress-nginx --to-version=1```
+
+  - ***Set limit/request resouce***
+
+  ```
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: pod-1
+  spec:
+    containers:
+    - name: pod-1
+      image: busybox
+      command: ["sleep", "4800"]
+      resources:
+        requests:
+          memory: 1M
+          cpu: 100m
+        limits:
+          memory: 10M
+          cpu: 1
+  ```
+
+  Quick command create `pod` with request/limit
+
+  ```kubectl run pod-1 --image=busybox --limits=cpu=1,memory=10M --requests=cpu=100m,memory=1M --command -- sleep 4800```
+
+  Set a deployments nginx container cpu limits to "100m" and memory to "256Mi":
+
+  ```kubectl set resources deployment nginx -c=nginx --limits=cpu=100m,memory=256Mi```
+
+  Set the resource request and limits for all containers in nginx:
+
+  ```kubectl set resources deployment nginx --limits=cpu=200m,memory=512Mi --requests=cpu=100m,memory=256Mi```
+
+  Ngoài ra, trong phần này bạn cần nắm rõ nguyên tắc hoạt động của các extensions như Deployment, StatefulSet cũng như DaemonSets. Hiểu và biết vận dụng vào các trường hợp nhất định.
 #### 20% - Services & Networking
 
-• Understand host networking configuration on the cluster nodes
-• Understand connectivity between Pods
-• Understand ClusterIP, NodePort, LoadBalancer service types and endpoints
-• Know how to use Ingress controllers and Ingress resources
-• Know how to configure and use CoreDNS
-• Choose an appropriate container network interface plugin
+- Understand host networking configuration on the cluster nodes
+- Understand connectivity between Pods
+- Understand ClusterIP, NodePort, LoadBalancer service types and endpoints
+- Know how to use Ingress controllers and Ingress resources
+- Know how to configure and use CoreDNS
+- Choose an appropriate container network interface plugin
+
+- ***Create services with nodePort for deployment nginx***
+
+  ```kubectl expose deployment nginx --name=<service-name> --port=80 --target-port=80 --type=NodePort```
+
+- ***Create services with clusterIP for pod nginx***
+
+  ```kubectl expose pod nginx --name=<service-name> --port=80 --target-port=80```
+
+- ***Create networkpolicy***
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: <name_network_policy>
+  # namespace: namespace | if task required
+spec:
+  podSelector: {} # must have this spec. If network policy apply for all pods in a namespace. Fill {}. If apply for invidiual pod, fill matchLabels: and labels of pod.
+  # podSelector:
+  #   matchLabels:
+  #     app: db
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+      podSelector:
+        matchLabels:
+          app: front-end
+    ports:
+    - port: 80
+      protocol: TCP
+```
 
 #### 10% - Storage
 
@@ -391,7 +519,18 @@ $ kubectl edit pvc example-pvc --record=true
 
 #### 30% - Troubleshooting
 
+Troubleshoot thì có khá rộng. Tuy nhiên trong phạm vi cert thì phần lớn chú trọng vào các điểm như sau:
 
+- kubelet đã start hay chưa? Có startup on-boot chưa
+- kubectl scheduler đang work properly?
+- kubectl-apiserver đang work properly?
+
+Theo tôi tìm hiểu phần lớn các lỗi của các component trên đều có những cái sai như sau:
+- Binary path  của kubelet, kube-scheduler hay kube-apiserver bị sai.
+- Path certificate bị sai
+- Image name của container  kubec-schuduler hay apiserver trong static pod bị sai.
+
+Cố gắng đọc kỹ yêu cầu của đề. Maybe chỉ đơn giản là lệnh start services của kubelet và enable services kubelet là bạn đã hoàn thành câu trả lời.
 
 ## Cluster for CKA
 
@@ -430,3 +569,11 @@ and then
 complete -F __start_kubectl k
 
 ```
+
+## Notes
+
+- Nếu bạn có dự định thi chứng chỉ CKA thì nên đăng ký liền. Vì khi đăng ký, CNCF sẽ cho bạn 2 session simulator trên killer.sh. Mỗi session sẽ được 36 tiếng khi bạn active nó. Bạn hãy tận dụng triệt đẽ 2 session này để tập làm quen cũng như nhuần nhuyễn các câu lệnh.
+
+- Theo kinh nghiệm thì bạn nên active session đầu tiên khi bạn có vài kiến thức cơ bản. Cố gắng làm các task đó mà không cần nhìn vào đáp án. Session thứ 2 bạn nên active trước ngày thi 1->2 ngày để cũng cố lại kiến thức.
+
+- CKA sẽ cho bạn 1 lần retake nếu first attempt của bạn bị failed. Nên đừng quá lo lắng. Nhưng theo những gì tôi tìm hiểu về CKA này thì bạn nên đăng ký tiếp lần 2 vì có khả năng bạn sẽ làm lại bộ đề giống như first attempt. Tuy nhiên đây chỉ là những trick giúp bạn pass CKA chứ ko giúp bạn có nhiều kiến thức về k8s.
