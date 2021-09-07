@@ -205,7 +205,132 @@ Taints: node-role.kubernetes.io/master:NoSchedule
     - name: pod
       image: nginx
   ```
+
 - NodeSelector
+  
+  Node selector sử dụng để assign pod đến một một tập các nodes. Có rất nhiều cách để làm thực hiện,  trong đó sử dụng `labels selectors` để action.
+
+  Tạo 1 pod `pod1` chạy với trên node đang có GPU. 
+
+  Giả sử node01 đang có GPU nhưng chưa được set labels để dễ detect.
+  
+  ``` shell
+  # Set labels GPU=true for node 01
+  kubectl labels nodes node01 gpu=true
+  ```
+
+  Tạo 1 pod với thuộc tính nodeSelector:
+
+  ``` yaml
+  // pod1.yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: podd1
+  spec:
+    nodeSelector:
+      gpu: true 
+    containers:
+    - name: pod1
+      image: nginx
+  ```
+
+  Nodeselector trên pod.Specs có format là một kiểu map[string]string. Do đó không thể sử dụng cùng 1 loại key cho nodeSelector
+
+  Ví dụ hạ tầng node có 3 loại disk được phân theo labels: disk=sata, disk=ssd và disk=sas. Thì nodeSelector không thể giải quyết bài toán shedule cho pod nếu yêu cầu pod có thể chạy trên disk là sata or disk là sas.
+
+  Các điều kiện trong nodeSelector được thực hiện bằng `AND` operators.
+
+- Affinity và AntiAffinity
+
+  Tính năng affinity và antiAffitiny  giải quyết hạn chế của nodeSelector. 
+
+  1. Cung cấp nhiều quy tắc so sánh hơn so với nodeSelector (nodeSelector chỉ hỗ trợ `AND` operator)
+  2. Cung cấp thêm một cơ chế matching là `soft`. Nghĩa là nếu pod có những thuộc tính mà `kube-scheduler` không đáp ứng được, thì pod này vẫn được schedule. Như nodeSelector là `hard` matching. Nếu không có node nào đáp ứng đúng những labels của `POD` cần select thì `pod` sẽ ở trạng thái pending đến khi nào có 1 node thỏa điều kiện
+  3. Ngoài ra với antiAffinity: `pod` sẽ được hạn chế schedule trên các labels của các `pods` đang chạy. Ví dụ như khi bạn triển khai deployment một application nào đó với replicas là 6. Tuy nhiên hiện tại chỉ có 5 node available. Nếu như không có thuộc tính antiAffinity thì sẽ có 1 node sẽ chạy ít nhất là 2 pod (phụ thuộc workload CPU)
+
+  Example:
+  ``` yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: pod-1
+  spec:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: disk
+              operator: In
+              values:
+              - sata
+              - sas
+    containers:
+    - name: with-node-affinity
+      image: k8s.gcr.io/pause:2.0
+  // Với config nodeAffinity này, pod chỉ được schedule trên những node có labels disk là sata hoặc là sas
+  ```
+  
+  Operator support: In, NotIn, Exists, DoseNotExists, Gt, Lt
+
+  Nếu cùng sử dụng cả hai `nodeSelector` và `nodeAffinity`, thì node ứng cử viên phải đáp ứng cả hai điều kiện.
+  
+  Nếu có nhiều `nodeSelectorTerms` trong `nodeAffinity` thì pod sẽ được scheduled trên lên node thỏa 1 trong những điều kiện của `nodeSelectTerms`
+
+  Nếu có nhiều `matchExpressions` trong `nodeSelectorTerms` thì pod sẽ được schedule lên node thỏa tất cả điều kiện của `matchExpressions`
+
+  **podAffinity/podAntiAffinty**
+
+  Hai thuộc tính này cho phép bạn  giới hạn các node mà các `pod` của bạn bạn đủ điều kiện để schedule dựa trên labels của `pod` đang chạy trên node.
+
+  Để dễ hiểu ta xem ví dụ dưới đây
+  ``` yaml
+  apiVersion: apps
+  kind: Deployment
+  metadata:
+    name: deploy-v1
+    labels:
+      id: deploy-v1
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        id: deploy-v1
+    template:
+      metadata:
+
+        labels:
+          id: deploy-v1
+      spec:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                - key: id
+                  operator: In
+                  values:
+                  - deploy-v1
+              topologyKey: "kubernetes.io/hostname"
+        containers:
+        - name: nginx
+          image: nginx
+  ```
+
+  Với manifest như thế này thì pod sẽ không được schedule trên chính các node mà đã chưa pod deploy-v1-xxxx-xxxx đang chạy.
+
+  Ví dụ với replicas là 2, định nghĩa thứ tự mỗi pod là pod-1 và pod-2. Và hệ thống hiện tại chỉ có 1 worker  A đang available. Đầu tiên pod-1 sẽ được schedule trên worker A. Lúc đo pod đang có labels `id=deploy-v1`.  Sau đó pod-2 sẽ tiếp tục schedule, tuy nhiên khi check điều kiện `affinity` thì worker A không thỏa điều kiện dó đã có pod-1 đang chạy trên đó có labels match với điều kiện của podAntiAffinity
+
+  Tham khảo thêm [link](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/) để biết thêm về namespaceSelector cũng như hiểu được 4 cơ chế scheduler:
+
+    - requiredDuringScheduling**Ignored**DuringExecution
+    - preferredDuringScheduling**Ignored**DuringExecution
+    - requiredDuringScheduling**Required**DuringExecution
+    - preferredDuringScheduling**Ignored**DuringExecution
+
+  Phần này sẽ không có trong đề thi CKA tuy nhiên cũng là một kiến thức bạn nên cần nắm vũng.
+
 **Workloads**
 
 #### 20% - Services & Networking
